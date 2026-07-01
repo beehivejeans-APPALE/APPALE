@@ -5,12 +5,12 @@ APPALE! リポジトリで作業する際の方針。
 ## プロジェクト概要
 
 日本語の対話だけで、世界に向けたクラウドファンディングページを完成できるAIプラットフォーム。
-詳細なビジョン・想定機能・技術スタックは [`docs/00_PROJECT.md`](docs/00_PROJECT.md) を参照。現在は設計フェーズで実装コードは存在しない。
+詳細なビジョン・想定機能は [`docs/00_PROJECT.md`](docs/00_PROJECT.md) を参照。Phase 1 として認証機能の実装に着手済み（詳細は [`docs/01_AUTH.md`](docs/01_AUTH.md)）。AI対話・ページ生成などのコア機能は未実装。
 
 ## 構成
 
 - `docs/` — 設計・仕様ドキュメント。新しい設計判断はここに追記する。
-- `src/frontend/` — TypeScript（Next.js想定）フロントエンド（未実装）
+- `src/frontend/` — TypeScript（Next.js, App Router）フロントエンド。Supabase Auth（マジックリンク）による認証の土台のみ実装済み。
 - `src/backend/` — Python バックエンド（未実装）
 
 ## 開発方針
