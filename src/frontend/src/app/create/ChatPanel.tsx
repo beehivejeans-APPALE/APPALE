@@ -9,6 +9,10 @@ import {
   type GeneratedPageContent,
   type GeneratePageApiResponse,
 } from "@/types/chat";
+import type {
+  GetOrCreateProjectApiResponse,
+  ProjectPatchBody,
+} from "@/types/project";
 import ExtractedPanel from "./ExtractedPanel";
 import PagePreview from "./PagePreview";
 
@@ -18,8 +22,13 @@ const INITIAL_MESSAGE: ChatMessage = {
     "こんにちは！クラウドファンディングの企画について、一緒に整理していきましょう。まずは、今回のプロジェクトでどんなことを実現したいか教えてください。",
 };
 
+// 抽出データ・会話ログの自動保存デバウンス時間（ms）。入力がこの時間止まったら保存する。
+const AUTOSAVE_DEBOUNCE_MS = 1500;
+
+type SaveStatus = "idle" | "saving" | "saved" | "error";
+
 export default function ChatPanel() {
-  const [messages, setMessages] = useState<ChatMessage[]>([INITIAL_MESSAGE]);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [extracted, setExtracted] = useState<ExtractedFields>(
     EMPTY_EXTRACTED_FIELDS,
   );
@@ -31,10 +40,52 @@ export default function ChatPanel() {
   const [generating, setGenerating] = useState(false);
   const [generateError, setGenerateError] = useState<string | null>(null);
   const [showPreview, setShowPreview] = useState(false);
+  const [projectId, setProjectId] = useState<string | null>(null);
+  const [loaded, setLoaded] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
   const bottomRef = useRef<HTMLDivElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   const formRef = useRef<HTMLFormElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // 初回表示時、ユーザーの既存プロジェクトを読み込む（なければサーバー側で新規作成される）。
+  useEffect(() => {
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const res = await fetch("/api/project", { method: "POST" });
+        if (!res.ok) throw new Error("failed to load project");
+
+        const data = (await res.json()) as GetOrCreateProjectApiResponse;
+        if (cancelled) return;
+
+        setProjectId(data.project.id);
+        setMessages(
+          data.project.messages.length > 0
+            ? data.project.messages
+            : [INITIAL_MESSAGE],
+        );
+        setExtracted(data.project.extracted);
+        setGeneratedPage(data.project.generatedPage);
+        setSaveStatus("saved");
+        setLoaded(true);
+      } catch (err) {
+        console.error("Failed to load project:", err);
+        if (!cancelled) {
+          setLoadError(
+            "プロジェクトの読み込みに失敗しました。ページを再読み込みしてください。",
+          );
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -46,6 +97,46 @@ export default function ChatPanel() {
     el.style.height = "auto";
     el.style.height = `${el.scrollHeight}px`;
   }, [input]);
+
+  async function performSave(
+    id: string,
+    partial: Omit<ProjectPatchBody, "id">,
+  ) {
+    setSaveStatus("saving");
+    try {
+      const res = await fetch("/api/project", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id, ...partial } satisfies ProjectPatchBody),
+      });
+      if (!res.ok) throw new Error("failed to save project");
+      setSaveStatus("saved");
+    } catch (err) {
+      console.error("Failed to save project:", err);
+      setSaveStatus("error");
+    }
+  }
+
+  // 変更が1〜2秒止まったら保存する（ヒアリング内容の自動保存用）。
+  function scheduleSave(partial: Omit<ProjectPatchBody, "id">) {
+    if (!projectId) return;
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    setSaveStatus("saving");
+    saveTimerRef.current = setTimeout(() => {
+      saveTimerRef.current = null;
+      performSave(projectId, partial);
+    }, AUTOSAVE_DEBOUNCE_MS);
+  }
+
+  // デバウンスせず即座に保存する（ページ生成結果、リセットなど明示的な操作の直後に使う）。
+  function saveImmediately(partial: Omit<ProjectPatchBody, "id">) {
+    if (!projectId) return;
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+    }
+    performSave(projectId, partial);
+  }
 
   function handleInputKeyDown(event: React.KeyboardEvent<HTMLTextAreaElement>) {
     if (event.key !== "Enter" || event.shiftKey) return;
@@ -71,6 +162,11 @@ export default function ChatPanel() {
     setGenerating(false);
     setGenerateError(null);
     setShowPreview(false);
+    saveImmediately({
+      messages: [],
+      extracted: EMPTY_EXTRACTED_FIELDS,
+      generatedPage: null,
+    });
   }
 
   async function handleGeneratePage() {
@@ -99,6 +195,7 @@ export default function ChatPanel() {
       const data = (await res.json()) as GeneratePageApiResponse;
       setGeneratedPage(data.page);
       setShowPreview(true);
+      saveImmediately({ generatedPage: data.page });
     } catch (err) {
       setGenerateError(
         err instanceof Error
@@ -156,8 +253,13 @@ export default function ChatPanel() {
       // （abort()が間に合わず正常に完了した場合の保険）。
       if (abortControllerRef.current !== controller) return;
 
-      setMessages([...nextMessages, { role: "model", content: data.reply }]);
+      const finalMessages: ChatMessage[] = [
+        ...nextMessages,
+        { role: "model", content: data.reply },
+      ];
+      setMessages(finalMessages);
       setExtracted(data.extracted);
+      scheduleSave({ messages: finalMessages, extracted: data.extracted });
     } catch (err) {
       if (err instanceof Error && err.name === "AbortError") {
         // リセットによる意図的な中断。エラー表示はしない。
@@ -187,12 +289,33 @@ export default function ChatPanel() {
     }
   }
 
+  if (loadError) {
+    return (
+      <div className="mx-auto flex w-full max-w-4xl flex-1 items-center justify-center px-4 py-6">
+        <p className="text-sm text-red-600 dark:text-red-400">{loadError}</p>
+      </div>
+    );
+  }
+
+  if (!loaded) {
+    return (
+      <div className="mx-auto flex w-full max-w-4xl flex-1 items-center justify-center px-4 py-6">
+        <p className="text-sm text-zinc-500 dark:text-zinc-400">
+          読み込み中...
+        </p>
+      </div>
+    );
+  }
+
   return (
     <div className="mx-auto flex w-full max-w-4xl flex-1 flex-col gap-4 px-4 py-6 md:min-h-0">
       <div className="flex items-center justify-between">
-        <h1 className="text-lg font-semibold text-black dark:text-zinc-50">
-          {showPreview ? "ページのプレビュー" : "企画のヒアリング"}
-        </h1>
+        <div className="flex items-center gap-3">
+          <h1 className="text-lg font-semibold text-black dark:text-zinc-50">
+            {showPreview ? "ページのプレビュー" : "企画のヒアリング"}
+          </h1>
+          <SaveStatusIndicator status={saveStatus} />
+        </div>
         <div className="flex items-center gap-2">
           {generatedPage && (
             <div className="flex rounded-full border border-black/[.08] p-0.5 text-sm dark:border-white/[.145]">
@@ -306,4 +429,22 @@ export default function ChatPanel() {
       )}
     </div>
   );
+}
+
+function SaveStatusIndicator({ status }: { status: SaveStatus }) {
+  if (status === "idle") return null;
+
+  const label =
+    status === "saving"
+      ? "保存中..."
+      : status === "saved"
+        ? "保存済み"
+        : "保存に失敗しました";
+
+  const colorClass =
+    status === "error"
+      ? "text-red-600 dark:text-red-400"
+      : "text-zinc-400 dark:text-zinc-500";
+
+  return <span className={`text-xs ${colorClass}`}>{label}</span>;
 }
