@@ -46,3 +46,26 @@ export function mergeExtractedFields(
     reward: updates.reward === null ? "" : updates.reward || prev.reward,
   };
 }
+
+// 4項目すべてに値が入っている（ヒアリング完了）かどうかを判定する。
+// route.ts（質問強制の要否判定）、ExtractedPanel.tsx（完了表示）、
+// ChatPanel.tsx（ページ生成ボタンの表示可否）で共有する。
+export function isExtractedComplete(extracted: ExtractedFields): boolean {
+  return Object.values(extracted).every((value) => value.trim() !== "");
+}
+
+export type PageReward = {
+  title: string;
+  description: string;
+};
+
+export type GeneratedPageContent = {
+  title: string;
+  tagline: string;
+  story: string;
+  rewards: PageReward[];
+};
+
+export type GeneratePageApiResponse = {
+  page: GeneratedPageContent;
+};

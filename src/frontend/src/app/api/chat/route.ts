@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import {
   EMPTY_EXTRACTED_FIELDS,
+  isExtractedComplete,
   mergeExtractedFields,
   type ChatMessage,
   type ExtractedFields,
@@ -107,10 +108,6 @@ function toExtractedFields(value: unknown): ExtractedFields {
 function endsWithQuestion(message: string): boolean {
   const trimmed = message.trim().replace(/[。！]+$/u, "");
   return trimmed.endsWith("？") || trimmed.endsWith("?") || trimmed.endsWith("か");
-}
-
-function isExtractedComplete(extracted: ExtractedFields): boolean {
-  return Object.values(extracted).every((value) => value.trim() !== "");
 }
 
 async function generateTurn(

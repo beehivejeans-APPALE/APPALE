@@ -5,7 +5,7 @@ APPALE! リポジトリで作業する際の方針。
 ## プロジェクト概要
 
 日本語の対話だけで、世界に向けたクラウドファンディングページを完成できるAIプラットフォーム。
-詳細なビジョン・想定機能は [`docs/00_PROJECT.md`](docs/00_PROJECT.md) を参照。Phase 1 として認証機能の実装に着手済み（詳細は [`docs/01_AUTH.md`](docs/01_AUTH.md)）。Phase 2 として、企画をヒアリングするチャット画面と、会話からの構造化データ抽出・サイドパネル表示を実装済み（詳細は [`docs/02_CREATE_CHAT.md`](docs/02_CREATE_CHAT.md)）。クラファンページ生成はまだ未実装。
+詳細なビジョン・想定機能は [`docs/00_PROJECT.md`](docs/00_PROJECT.md) を参照。Phase 1 として認証機能の実装に着手済み（詳細は [`docs/01_AUTH.md`](docs/01_AUTH.md)）。Phase 2 として、企画をヒアリングするチャット画面、会話からの構造化データ抽出・サイドパネル表示、およびヒアリング完了後のクラファンページ文章生成・プレビュー表示を実装済み（詳細は [`docs/02_CREATE_CHAT.md`](docs/02_CREATE_CHAT.md)）。生成したページのDB保存・公開ページとしての表示はまだ未実装。
 
 ## 構成
 
@@ -22,5 +22,5 @@ APPALE! リポジトリで作業する際の方針。
 
 ## 既知の改善候補（未対応）
 
-- `ExtractedFields`（purpose/target/story/reward の4項目）のフィールド名が `src/frontend/src/app/create/ExtractedPanel.tsx`・`src/frontend/src/app/api/chat/route.ts`・`src/frontend/src/app/create/ChatPanel.tsx` の3箇所に個別にハードコードされており、単一の情報源がない。将来項目を追加する際、一部の箇所だけ更新し忘れるリスクがある。
-- `src/frontend/src/app/api/chat/route.ts` で、Gemini APIが構造化出力のスキーマに反する不正な形式（例: JSON文字列 `"null"` など）を返した場合、エラー分類が粗く、本来 `invalid_model_response` になるべきケースが汎用的な `gemini_error` として記録されることがある。
+- `ExtractedFields`（purpose/target/story/reward の4項目）のフィールド名が `src/frontend/src/app/create/ExtractedPanel.tsx`・`src/frontend/src/app/api/chat/route.ts`・`src/frontend/src/app/create/ChatPanel.tsx`・`src/frontend/src/app/api/generate-page/route.ts` の4箇所に個別にハードコードされており、単一の情報源がない。将来項目を追加する際、一部の箇所だけ更新し忘れるリスクがある（なお「4項目すべて埋まっているか」の判定ロジック自体は `isExtractedComplete`（`src/frontend/src/types/chat.ts`）として共通化済み）。
+- `src/frontend/src/app/api/chat/route.ts` と `src/frontend/src/app/api/generate-page/route.ts` で、Gemini APIが構造化出力のスキーマに反する不正な形式（例: JSON文字列 `"null"` など）を返した場合、エラー分類が粗く、本来 `invalid_model_response` になるべきケースが汎用的な `gemini_error` として記録されることがある。

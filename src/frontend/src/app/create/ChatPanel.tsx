@@ -6,8 +6,11 @@ import {
   type ChatApiResponse,
   type ChatMessage,
   type ExtractedFields,
+  type GeneratedPageContent,
+  type GeneratePageApiResponse,
 } from "@/types/chat";
 import ExtractedPanel from "./ExtractedPanel";
+import PagePreview from "./PagePreview";
 
 const INITIAL_MESSAGE: ChatMessage = {
   role: "model",
@@ -23,6 +26,11 @@ export default function ChatPanel() {
   const [input, setInput] = useState("");
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [generatedPage, setGeneratedPage] =
+    useState<GeneratedPageContent | null>(null);
+  const [generating, setGenerating] = useState(false);
+  const [generateError, setGenerateError] = useState<string | null>(null);
+  const [showPreview, setShowPreview] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   const formRef = useRef<HTMLFormElement>(null);
@@ -59,6 +67,47 @@ export default function ChatPanel() {
     setExtracted(EMPTY_EXTRACTED_FIELDS);
     setInput("");
     setError(null);
+    setGeneratedPage(null);
+    setGenerating(false);
+    setGenerateError(null);
+    setShowPreview(false);
+  }
+
+  async function handleGeneratePage() {
+    if (generating) return;
+
+    setGenerating(true);
+    setGenerateError(null);
+
+    try {
+      const res = await fetch("/api/generate-page", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ extracted }),
+      });
+
+      if (res.status === 429) {
+        throw new Error(
+          "現在アクセスが集中しています。少し時間をおいてから、もう一度お試しください。",
+        );
+      }
+
+      if (!res.ok) {
+        throw new Error("ページの生成に失敗しました。");
+      }
+
+      const data = (await res.json()) as GeneratePageApiResponse;
+      setGeneratedPage(data.page);
+      setShowPreview(true);
+    } catch (err) {
+      setGenerateError(
+        err instanceof Error
+          ? err.message
+          : "ページの生成に失敗しました。もう一度お試しください。",
+      );
+    } finally {
+      setGenerating(false);
+    }
   }
 
   async function handleSubmit(event: React.FormEvent) {
@@ -139,12 +188,38 @@ export default function ChatPanel() {
   }
 
   return (
-    <div className="mx-auto flex w-full max-w-4xl flex-1 flex-col gap-4 px-4 py-6 md:min-h-0 md:flex-row">
-      <div className="flex flex-1 flex-col md:min-h-0">
-        <div className="mb-4 flex items-center justify-between">
-          <h1 className="text-lg font-semibold text-black dark:text-zinc-50">
-            企画のヒアリング
-          </h1>
+    <div className="mx-auto flex w-full max-w-4xl flex-1 flex-col gap-4 px-4 py-6 md:min-h-0">
+      <div className="flex items-center justify-between">
+        <h1 className="text-lg font-semibold text-black dark:text-zinc-50">
+          {showPreview ? "ページのプレビュー" : "企画のヒアリング"}
+        </h1>
+        <div className="flex items-center gap-2">
+          {generatedPage && (
+            <div className="flex rounded-full border border-black/[.08] p-0.5 text-sm dark:border-white/[.145]">
+              <button
+                type="button"
+                onClick={() => setShowPreview(false)}
+                className={`rounded-full px-3 py-1 transition-colors ${
+                  showPreview
+                    ? "text-zinc-500 hover:text-black dark:text-zinc-400 dark:hover:text-zinc-50"
+                    : "bg-foreground text-background"
+                }`}
+              >
+                チャット
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowPreview(true)}
+                className={`rounded-full px-3 py-1 transition-colors ${
+                  showPreview
+                    ? "bg-foreground text-background"
+                    : "text-zinc-500 hover:text-black dark:text-zinc-400 dark:hover:text-zinc-50"
+                }`}
+              >
+                プレビュー
+              </button>
+            </div>
+          )}
           <button
             type="button"
             onClick={handleReset}
@@ -153,68 +228,82 @@ export default function ChatPanel() {
             最初からやり直す
           </button>
         </div>
-
-        <div className="flex-1 space-y-4 overflow-y-auto rounded-2xl border border-black/[.08] bg-white p-4 dark:border-white/[.145] dark:bg-zinc-900">
-          {messages.map((message, index) => (
-            <div
-              key={index}
-              className={`flex ${
-                message.role === "user" ? "justify-end" : "justify-start"
-              }`}
-            >
-              <div
-                className={`max-w-[80%] rounded-2xl px-4 py-2 text-sm whitespace-pre-wrap ${
-                  message.role === "user"
-                    ? "bg-foreground text-background"
-                    : "bg-zinc-100 text-black dark:bg-zinc-800 dark:text-zinc-50"
-                }`}
-              >
-                {message.content}
-              </div>
-            </div>
-          ))}
-          {pending && (
-            <div className="flex justify-start">
-              <div className="max-w-[80%] rounded-2xl bg-zinc-100 px-4 py-2 text-sm text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400">
-                考え中...
-              </div>
-            </div>
-          )}
-          <div ref={bottomRef} />
-        </div>
-
-        {error && (
-          <p className="mt-2 text-sm text-red-600 dark:text-red-400">
-            {error}
-          </p>
-        )}
-
-        <form
-          ref={formRef}
-          onSubmit={handleSubmit}
-          className="mt-4 flex items-end gap-2"
-        >
-          <textarea
-            ref={textareaRef}
-            value={input}
-            onChange={(event) => setInput(event.target.value)}
-            onKeyDown={handleInputKeyDown}
-            placeholder="メッセージを入力（Shift+Enterで改行）"
-            disabled={pending}
-            rows={1}
-            className="max-h-40 flex-1 resize-none overflow-y-auto rounded-2xl border border-black/[.08] bg-transparent px-4 py-2 text-black outline-none focus:border-black/40 disabled:opacity-50 dark:border-white/[.145] dark:text-zinc-50 dark:focus:border-white/40"
-          />
-          <button
-            type="submit"
-            disabled={pending || !input.trim()}
-            className="rounded-full bg-foreground px-5 py-2 text-background transition-colors hover:bg-[#383838] disabled:opacity-50 dark:hover:bg-[#ccc]"
-          >
-            送信
-          </button>
-        </form>
       </div>
 
-      <ExtractedPanel extracted={extracted} />
+      {showPreview && generatedPage ? (
+        <PagePreview page={generatedPage} />
+      ) : (
+        <div className="flex flex-1 flex-col gap-4 md:min-h-0 md:flex-row">
+          <div className="flex flex-1 flex-col md:min-h-0">
+            <div className="flex-1 space-y-4 overflow-y-auto rounded-2xl border border-black/[.08] bg-white p-4 dark:border-white/[.145] dark:bg-zinc-900">
+              {messages.map((message, index) => (
+                <div
+                  key={index}
+                  className={`flex ${
+                    message.role === "user" ? "justify-end" : "justify-start"
+                  }`}
+                >
+                  <div
+                    className={`max-w-[80%] rounded-2xl px-4 py-2 text-sm whitespace-pre-wrap ${
+                      message.role === "user"
+                        ? "bg-foreground text-background"
+                        : "bg-zinc-100 text-black dark:bg-zinc-800 dark:text-zinc-50"
+                    }`}
+                  >
+                    {message.content}
+                  </div>
+                </div>
+              ))}
+              {pending && (
+                <div className="flex justify-start">
+                  <div className="max-w-[80%] rounded-2xl bg-zinc-100 px-4 py-2 text-sm text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400">
+                    考え中...
+                  </div>
+                </div>
+              )}
+              <div ref={bottomRef} />
+            </div>
+
+            {error && (
+              <p className="mt-2 text-sm text-red-600 dark:text-red-400">
+                {error}
+              </p>
+            )}
+
+            <form
+              ref={formRef}
+              onSubmit={handleSubmit}
+              className="mt-4 flex items-end gap-2"
+            >
+              <textarea
+                ref={textareaRef}
+                value={input}
+                onChange={(event) => setInput(event.target.value)}
+                onKeyDown={handleInputKeyDown}
+                placeholder="メッセージを入力（Shift+Enterで改行）"
+                disabled={pending}
+                rows={1}
+                className="max-h-40 flex-1 resize-none overflow-y-auto rounded-2xl border border-black/[.08] bg-transparent px-4 py-2 text-black outline-none focus:border-black/40 disabled:opacity-50 dark:border-white/[.145] dark:text-zinc-50 dark:focus:border-white/40"
+              />
+              <button
+                type="submit"
+                disabled={pending || !input.trim()}
+                className="rounded-full bg-foreground px-5 py-2 text-background transition-colors hover:bg-[#383838] disabled:opacity-50 dark:hover:bg-[#ccc]"
+              >
+                送信
+              </button>
+            </form>
+          </div>
+
+          <ExtractedPanel
+            extracted={extracted}
+            hasGeneratedPage={generatedPage !== null}
+            generating={generating}
+            generateError={generateError}
+            onGenerate={handleGeneratePage}
+          />
+        </div>
+      )}
     </div>
   );
 }
