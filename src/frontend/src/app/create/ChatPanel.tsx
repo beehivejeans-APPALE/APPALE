@@ -26,10 +26,26 @@ export default function ChatPanel() {
   const [error, setError] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const formRef = useRef<HTMLFormElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
+
+  useEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${el.scrollHeight}px`;
+  }, [input]);
+
+  function handleInputKeyDown(event: React.KeyboardEvent<HTMLTextAreaElement>) {
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      formRef.current?.requestSubmit();
+    }
+  }
 
   function handleReset() {
     // 送信中のリクエストがあれば中断し、後から届く古い応答が
@@ -106,8 +122,8 @@ export default function ChatPanel() {
   }
 
   return (
-    <div className="mx-auto flex w-full max-w-4xl flex-1 flex-col gap-4 px-4 py-6 md:flex-row">
-      <div className="flex flex-1 flex-col">
+    <div className="mx-auto flex w-full max-w-4xl flex-1 flex-col gap-4 px-4 py-6 md:min-h-0 md:flex-row">
+      <div className="flex flex-1 flex-col md:min-h-0">
         <div className="mb-4 flex items-center justify-between">
           <h1 className="text-lg font-semibold text-black dark:text-zinc-50">
             企画のヒアリング
@@ -156,14 +172,20 @@ export default function ChatPanel() {
           </p>
         )}
 
-        <form onSubmit={handleSubmit} className="mt-4 flex gap-2">
-          <input
-            type="text"
+        <form
+          ref={formRef}
+          onSubmit={handleSubmit}
+          className="mt-4 flex items-end gap-2"
+        >
+          <textarea
+            ref={textareaRef}
             value={input}
             onChange={(event) => setInput(event.target.value)}
-            placeholder="メッセージを入力"
+            onKeyDown={handleInputKeyDown}
+            placeholder="メッセージを入力（Shift+Enterで改行）"
             disabled={pending}
-            className="flex-1 rounded-full border border-black/[.08] bg-transparent px-4 py-2 text-black outline-none focus:border-black/40 disabled:opacity-50 dark:border-white/[.145] dark:text-zinc-50 dark:focus:border-white/40"
+            rows={1}
+            className="max-h-40 flex-1 resize-none overflow-y-auto rounded-2xl border border-black/[.08] bg-transparent px-4 py-2 text-black outline-none focus:border-black/40 disabled:opacity-50 dark:border-white/[.145] dark:text-zinc-50 dark:focus:border-white/40"
           />
           <button
             type="submit"

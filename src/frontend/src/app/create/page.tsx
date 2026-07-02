@@ -13,7 +13,7 @@ export default async function CreatePage() {
   }
 
   return (
-    <div className="flex flex-1 flex-col bg-zinc-50 dark:bg-black">
+    <div className="flex flex-1 flex-col bg-zinc-50 md:h-dvh md:flex-none md:overflow-hidden dark:bg-black">
       <ChatPanel />
     </div>
   );
