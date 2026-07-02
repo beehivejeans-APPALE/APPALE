@@ -20,6 +20,12 @@ export default function ChatPanel() {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
+  function handleReset() {
+    setMessages([INITIAL_MESSAGE]);
+    setInput("");
+    setError(null);
+  }
+
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
 
@@ -43,14 +49,24 @@ export default function ChatPanel() {
         body: JSON.stringify({ messages: nextMessages }),
       });
 
+      if (res.status === 429) {
+        throw new Error(
+          "現在アクセスが集中しています。少し時間をおいてから、もう一度お試しください。",
+        );
+      }
+
       if (!res.ok) {
         throw new Error("AIとの通信に失敗しました。");
       }
 
       const data = await res.json();
       setMessages([...nextMessages, { role: "model", content: data.reply }]);
-    } catch {
-      setError("AIとの通信に失敗しました。もう一度お試しください。");
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "AIとの通信に失敗しました。もう一度お試しください。",
+      );
     } finally {
       setPending(false);
     }
@@ -58,9 +74,18 @@ export default function ChatPanel() {
 
   return (
     <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col px-4 py-6">
-      <h1 className="mb-4 text-lg font-semibold text-black dark:text-zinc-50">
-        企画のヒアリング
-      </h1>
+      <div className="mb-4 flex items-center justify-between">
+        <h1 className="text-lg font-semibold text-black dark:text-zinc-50">
+          企画のヒアリング
+        </h1>
+        <button
+          type="button"
+          onClick={handleReset}
+          className="rounded-full border border-black/[.08] px-4 py-1.5 text-sm transition-colors hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a]"
+        >
+          新しい企画を始める
+        </button>
+      </div>
 
       <div className="flex-1 space-y-4 overflow-y-auto rounded-2xl border border-black/[.08] bg-white p-4 dark:border-white/[.145] dark:bg-zinc-900">
         {messages.map((message, index) => (
