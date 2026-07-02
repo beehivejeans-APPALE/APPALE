@@ -3,7 +3,6 @@
 import { useEffect, useRef, useState } from "react";
 import {
   EMPTY_EXTRACTED_FIELDS,
-  mergeExtractedFields,
   type ChatApiResponse,
   type ChatMessage,
   type ExtractedFields,
@@ -85,7 +84,10 @@ export default function ChatPanel() {
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: nextMessages }),
+        body: JSON.stringify({
+          messages: nextMessages,
+          previousExtracted: extracted,
+        }),
         signal: controller.signal,
       });
 
@@ -106,7 +108,7 @@ export default function ChatPanel() {
       if (abortControllerRef.current !== controller) return;
 
       setMessages([...nextMessages, { role: "model", content: data.reply }]);
-      setExtracted((prev) => mergeExtractedFields(prev, data.extracted));
+      setExtracted(data.extracted);
     } catch (err) {
       if (err instanceof Error && err.name === "AbortError") {
         // リセットによる意図的な中断。エラー表示はしない。

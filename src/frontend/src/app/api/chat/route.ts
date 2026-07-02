@@ -1,7 +1,13 @@
 import { ApiError, GoogleGenAI } from "@google/genai";
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import type { ChatMessage, ExtractedFieldUpdates } from "@/types/chat";
+import {
+  EMPTY_EXTRACTED_FIELDS,
+  mergeExtractedFields,
+  type ChatMessage,
+  type ExtractedFields,
+  type ExtractedFieldUpdates,
+} from "@/types/chat";
 
 const SYSTEM_INSTRUCTION = `
 あなたはクラウドファンディングの企画立案を手伝う、親しみやすい日本語の聞き役AIです。
@@ -33,6 +39,11 @@ const SYSTEM_INSTRUCTION = `
   3. ユーザーが以前の回答を明確に訂正・撤回し、その項目を振り出しに戻したいと伝えた場合のみ: null にする。
 `.trim();
 
+const FORCE_QUESTION_INSTRUCTION = `
+重要: 直前のあなたの発言には質問が含まれていなかった。今回の追加の発言は、必ず質問（疑問文）で終わらせること。
+感想・共感・要約の繰り返しだけで終わることは禁止する。直前の自分の発言に自然につながる形で、次に聞きたいことを1つだけ質問する短い発言をすること。
+`.trim();
+
 const MODEL = "gemini-2.5-flash";
 
 const EXTRACTED_FIELD_DESCRIPTION =
@@ -56,6 +67,11 @@ const RESPONSE_JSON_SCHEMA = {
   required: ["message", "extracted"],
 };
 
+class InvalidModelResponseError extends Error {}
+
+type GeminiContent = { role: string; parts: { text: string }[] };
+type ChatTurnResult = { message: string; extractedUpdates: ExtractedFieldUpdates };
+
 function toExtractedFieldUpdates(value: unknown): ExtractedFieldUpdates {
   if (typeof value !== "object" || value === null) {
     return { purpose: "", target: "", story: "", reward: "" };
@@ -73,6 +89,74 @@ function toExtractedFieldUpdates(value: unknown): ExtractedFieldUpdates {
   };
 }
 
+function toExtractedFields(value: unknown): ExtractedFields {
+  if (typeof value !== "object" || value === null) {
+    return EMPTY_EXTRACTED_FIELDS;
+  }
+
+  const record = value as Record<string, unknown>;
+  return {
+    purpose: typeof record.purpose === "string" ? record.purpose : "",
+    target: typeof record.target === "string" ? record.target : "",
+    story: typeof record.story === "string" ? record.story : "",
+    reward: typeof record.reward === "string" ? record.reward : "",
+  };
+}
+
+// 「？」「?」、または「〜か」で終わる文を質問とみなす簡易判定。
+function endsWithQuestion(message: string): boolean {
+  const trimmed = message.trim().replace(/[。！]+$/u, "");
+  return trimmed.endsWith("？") || trimmed.endsWith("?") || trimmed.endsWith("か");
+}
+
+function isExtractedComplete(extracted: ExtractedFields): boolean {
+  return Object.values(extracted).every((value) => value.trim() !== "");
+}
+
+async function generateTurn(
+  ai: GoogleGenAI,
+  contents: GeminiContent[],
+  extraInstruction?: string,
+): Promise<ChatTurnResult> {
+  const response = await ai.models.generateContent({
+    model: MODEL,
+    contents,
+    config: {
+      systemInstruction: extraInstruction
+        ? `${SYSTEM_INSTRUCTION}\n\n${extraInstruction}`
+        : SYSTEM_INSTRUCTION,
+      // gemini-2.5-flash はデフォルトで内部思考（thinking）が有効なため、明示的に無効化する。
+      // これがないと、モデルの思考過程がそのまま応答テキストに混ざって表示されてしまう。
+      thinkingConfig: { thinkingBudget: 0 },
+      responseMimeType: "application/json",
+      responseJsonSchema: RESPONSE_JSON_SCHEMA,
+    },
+  });
+
+  const raw = response.text;
+  if (!raw) {
+    throw new InvalidModelResponseError("empty response");
+  }
+
+  let parsed: { message?: unknown; extracted?: unknown };
+  try {
+    parsed = JSON.parse(raw);
+  } catch (error) {
+    console.error("Failed to parse Gemini JSON response:", error, raw);
+    throw new InvalidModelResponseError("failed to parse JSON response");
+  }
+
+  if (typeof parsed.message !== "string" || parsed.message.trim() === "") {
+    console.error("Gemini response has empty or missing message field:", raw);
+    throw new InvalidModelResponseError("empty or missing message field");
+  }
+
+  return {
+    message: parsed.message,
+    extractedUpdates: toExtractedFieldUpdates(parsed.extracted),
+  };
+}
+
 export async function POST(request: Request) {
   const supabase = await createClient();
   const {
@@ -85,64 +169,59 @@ export async function POST(request: Request) {
 
   const body = await request.json().catch(() => null);
   const messages = body?.messages as ChatMessage[] | undefined;
+  const previousExtracted = toExtractedFields(body?.previousExtracted);
 
   if (!Array.isArray(messages) || messages.length === 0) {
     return NextResponse.json({ error: "invalid request" }, { status: 400 });
   }
 
   const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+  const contents: GeminiContent[] = messages.map((message) => ({
+    role: message.role,
+    parts: [{ text: message.content }],
+  }));
 
   try {
-    const response = await ai.models.generateContent({
-      model: MODEL,
-      contents: messages.map((message) => ({
-        role: message.role,
-        parts: [{ text: message.content }],
-      })),
-      config: {
-        systemInstruction: SYSTEM_INSTRUCTION,
-        // gemini-2.5-flash はデフォルトで内部思考（thinking）が有効なため、明示的に無効化する。
-        // これがないと、モデルの思考過程がそのまま応答テキストに混ざって表示されてしまう。
-        thinkingConfig: { thinkingBudget: 0 },
-        responseMimeType: "application/json",
-        responseJsonSchema: RESPONSE_JSON_SCHEMA,
-      },
-    });
+    const first = await generateTurn(ai, contents);
 
-    const raw = response.text;
+    let combinedMessage = first.message;
+    let mergedExtracted = mergeExtractedFields(previousExtracted, first.extractedUpdates);
 
-    if (!raw) {
-      return NextResponse.json({ error: "empty response" }, { status: 502 });
-    }
+    // ヒアリングが完了していない状態で、質問を含まない発言だった場合のみ、
+    // 質問で終わることを条件にもう一度だけ追加の発言を生成する（上限1回）。
+    if (!isExtractedComplete(mergedExtracted) && !endsWithQuestion(first.message)) {
+      try {
+        const followUpContents: GeminiContent[] = [
+          ...contents,
+          { role: "model", parts: [{ text: first.message }] },
+        ];
+        const second = await generateTurn(ai, followUpContents, FORCE_QUESTION_INSTRUCTION);
 
-    let parsed: { message?: unknown; extracted?: unknown };
-    try {
-      parsed = JSON.parse(raw);
-    } catch (error) {
-      console.error("Failed to parse Gemini JSON response:", error, raw);
-      return NextResponse.json(
-        { error: "invalid_model_response" },
-        { status: 502 },
-      );
-    }
-
-    if (typeof parsed.message !== "string" || parsed.message.trim() === "") {
-      console.error("Gemini response has empty or missing message field:", raw);
-      return NextResponse.json(
-        { error: "invalid_model_response" },
-        { status: 502 },
-      );
+        combinedMessage = `${first.message}\n\n${second.message}`;
+        mergedExtracted = mergeExtractedFields(mergedExtracted, second.extractedUpdates);
+      } catch (followUpError) {
+        // 追加発言の生成に失敗しても、1回目の発言はすでに得られているため、
+        // それだけを返してユーザー体験を壊さないようにする。
+        console.error("Follow-up question generation failed:", followUpError);
+      }
     }
 
     return NextResponse.json({
-      reply: parsed.message,
-      extracted: toExtractedFieldUpdates(parsed.extracted),
+      reply: combinedMessage,
+      extracted: mergedExtracted,
     });
   } catch (error) {
     console.error("Gemini API error:", error);
 
     if (error instanceof ApiError && error.status === 429) {
       return NextResponse.json({ error: "rate_limited" }, { status: 429 });
+    }
+
+    if (error instanceof InvalidModelResponseError) {
+      return NextResponse.json(
+        { error: "invalid_model_response" },
+        { status: 502 },
+      );
     }
 
     return NextResponse.json({ error: "gemini_error" }, { status: 502 });

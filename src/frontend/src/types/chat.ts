@@ -32,7 +32,7 @@ export type ExtractedFieldUpdates = {
 
 export type ChatApiResponse = {
   reply: string;
-  extracted: ExtractedFieldUpdates;
+  extracted: ExtractedFields;
 };
 
 export function mergeExtractedFields(
