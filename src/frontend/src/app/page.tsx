@@ -19,6 +19,12 @@ export default async function Home() {
           <p className="text-sm text-zinc-600 dark:text-zinc-400">
             ログイン中: {user.email}
           </p>
+          <Link
+            href="/create"
+            className="rounded-full bg-foreground px-5 py-2 text-sm text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc]"
+          >
+            企画を始める
+          </Link>
           <form action={signOut}>
             <button
               type="submit"
