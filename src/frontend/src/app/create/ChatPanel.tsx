@@ -114,11 +114,21 @@ export default function ChatPanel() {
         // リセットによる意図的な中断。エラー表示はしない。
         return;
       }
-      setError(
-        err instanceof Error
-          ? err.message
-          : "AIとの通信に失敗しました。もう一度お試しください。",
-      );
+
+      // このリクエストがまだ最新のものである場合のみ、エラー表示と
+      // 会話履歴のロールバックを行う（リセット後に新しい送信が
+      // 始まっている場合は、そちらの状態を壊さないよう何もしない）。
+      if (abortControllerRef.current === controller) {
+        // 送信前の状態に戻し、失敗したユーザー発言を履歴に残さない。
+        // 再送信時に同じ発言が重複して残ってしまうのを防ぐため。
+        setMessages(messages);
+        setInput(content);
+        setError(
+          err instanceof Error
+            ? err.message
+            : "AIとの通信に失敗しました。もう一度お試しください。",
+        );
+      }
     } finally {
       // このリクエストがまだ最新のものである場合のみ pending を解除する
       // （リセット後に新しい送信が始まっている場合、そちらの状態を壊さない）。
