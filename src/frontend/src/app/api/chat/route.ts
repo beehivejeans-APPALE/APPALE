@@ -1,16 +1,16 @@
 import { ApiError, GoogleGenAI } from "@google/genai";
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import type { ChatMessage } from "@/types/chat";
+import type { ChatMessage, ExtractedFieldUpdates } from "@/types/chat";
 
 const SYSTEM_INSTRUCTION = `
 あなたはクラウドファンディングの企画立案を手伝う、親しみやすい日本語の聞き役AIです。
 
 あなたの目的は、ユーザーとの自然な会話を通じて、次の4つを無理なく聞き出すことです。
-1. 企画の目的（何を実現したいか）
-2. ターゲット（誰に向けたプロジェクトか）
-3. ストーリー（背景・想い）
-4. リターン設計（支援者に何を返すか）
+1. purpose（目的）: 企画の目的（何を実現したいか）
+2. target（ターゲット）: 誰に向けたプロジェクトか
+3. story（ストーリー）: 背景・想い
+4. reward（リターン設計）: 支援者に何を返すか
 
 会話の進め方のルール:
 - 一度に質問は1つだけにする。フォームの穴埋めのような機械的な質問の並べ方はしない。
@@ -23,9 +23,55 @@ const SYSTEM_INSTRUCTION = `
 - 常に日本語で、丁寧だが堅すぎない温かみのある口調で話す。
 - あなたの役目は、今この場での会話のみである。企画書やクラファンページの文章を生成することはしない。
 - 今後追加される予定の機能（ページ生成、その他の未実装機能など）については、一切言及しない。「準備中」「今後提供予定」といった言葉も使わない。
+
+出力形式のルール:
+- 必ず指定されたJSON形式で出力する。
+- "message" には、ユーザーに見せる会話文（上記ルールに従った自然な日本語の相槌・質問）だけを入れる。JSONや項目名など、会話文以外の内容を含めない。
+- "extracted" の各項目（purpose/target/story/reward）は、今回のターンで分かった内容だけを反映する。前のターンまでに分かった内容はアプリ側で保持されるため、繰り返す必要はない。各項目は次の3つのいずれかにする。
+  1. 今回のやり取りで新しく分かった、または内容が更新された場合: その内容を簡潔な日本語の文章で入れる。
+  2. 今回のやり取りでは特に言及がなかった場合: 空文字列（""）にする。
+  3. ユーザーが以前の回答を明確に訂正・撤回し、その項目を振り出しに戻したいと伝えた場合のみ: null にする。
 `.trim();
 
 const MODEL = "gemini-2.5-flash";
+
+const EXTRACTED_FIELD_DESCRIPTION =
+  '今回のターンで新しく分かった/更新された内容があれば文字列、言及がなければ空文字列""、ユーザーが明示的に訂正・撤回した場合のみnull。';
+
+const RESPONSE_JSON_SCHEMA = {
+  type: "object",
+  properties: {
+    message: { type: "string" },
+    extracted: {
+      type: "object",
+      properties: {
+        purpose: { type: ["string", "null"], description: EXTRACTED_FIELD_DESCRIPTION },
+        target: { type: ["string", "null"], description: EXTRACTED_FIELD_DESCRIPTION },
+        story: { type: ["string", "null"], description: EXTRACTED_FIELD_DESCRIPTION },
+        reward: { type: ["string", "null"], description: EXTRACTED_FIELD_DESCRIPTION },
+      },
+      required: ["purpose", "target", "story", "reward"],
+    },
+  },
+  required: ["message", "extracted"],
+};
+
+function toExtractedFieldUpdates(value: unknown): ExtractedFieldUpdates {
+  if (typeof value !== "object" || value === null) {
+    return { purpose: "", target: "", story: "", reward: "" };
+  }
+
+  const record = value as Record<string, unknown>;
+  const normalize = (field: unknown): string | null =>
+    typeof field === "string" ? field : field === null ? null : "";
+
+  return {
+    purpose: normalize(record.purpose),
+    target: normalize(record.target),
+    story: normalize(record.story),
+    reward: normalize(record.reward),
+  };
+}
 
 export async function POST(request: Request) {
   const supabase = await createClient();
@@ -58,24 +104,45 @@ export async function POST(request: Request) {
         // gemini-2.5-flash はデフォルトで内部思考（thinking）が有効なため、明示的に無効化する。
         // これがないと、モデルの思考過程がそのまま応答テキストに混ざって表示されてしまう。
         thinkingConfig: { thinkingBudget: 0 },
+        responseMimeType: "application/json",
+        responseJsonSchema: RESPONSE_JSON_SCHEMA,
       },
     });
 
-    const reply = response.text;
+    const raw = response.text;
 
-    if (!reply) {
+    if (!raw) {
       return NextResponse.json({ error: "empty response" }, { status: 502 });
     }
 
-    return NextResponse.json({ reply });
+    let parsed: { message?: unknown; extracted?: unknown };
+    try {
+      parsed = JSON.parse(raw);
+    } catch (error) {
+      console.error("Failed to parse Gemini JSON response:", error, raw);
+      return NextResponse.json(
+        { error: "invalid_model_response" },
+        { status: 502 },
+      );
+    }
+
+    if (typeof parsed.message !== "string" || parsed.message.trim() === "") {
+      console.error("Gemini response has empty or missing message field:", raw);
+      return NextResponse.json(
+        { error: "invalid_model_response" },
+        { status: 502 },
+      );
+    }
+
+    return NextResponse.json({
+      reply: parsed.message,
+      extracted: toExtractedFieldUpdates(parsed.extracted),
+    });
   } catch (error) {
     console.error("Gemini API error:", error);
 
     if (error instanceof ApiError && error.status === 429) {
-      return NextResponse.json(
-        { error: "rate_limited" },
-        { status: 429 },
-      );
+      return NextResponse.json({ error: "rate_limited" }, { status: 429 });
     }
 
     return NextResponse.json({ error: "gemini_error" }, { status: 502 });
