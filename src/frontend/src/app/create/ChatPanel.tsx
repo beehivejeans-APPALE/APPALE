@@ -41,10 +41,15 @@ export default function ChatPanel() {
   }, [input]);
 
   function handleInputKeyDown(event: React.KeyboardEvent<HTMLTextAreaElement>) {
-    if (event.key === "Enter" && !event.shiftKey) {
-      event.preventDefault();
-      formRef.current?.requestSubmit();
-    }
+    if (event.key !== "Enter" || event.shiftKey) return;
+
+    // IME変換確定のためのEnterは送信として扱わない。
+    // isComposingがブラウザによって正しく立たないケースがあるため、
+    // 旧来のkeyCode 229（IME入力中を示す値）も合わせてチェックする。
+    if (event.nativeEvent.isComposing || event.keyCode === 229) return;
+
+    event.preventDefault();
+    formRef.current?.requestSubmit();
   }
 
   function handleReset() {
