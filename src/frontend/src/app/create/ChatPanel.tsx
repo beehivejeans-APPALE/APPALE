@@ -83,7 +83,7 @@ export default function ChatPanel() {
           onClick={handleReset}
           className="rounded-full border border-black/[.08] px-4 py-1.5 text-sm transition-colors hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a]"
         >
-          新しい企画を始める
+          最初からやり直す
         </button>
       </div>
 
