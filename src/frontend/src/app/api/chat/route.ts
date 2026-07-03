@@ -104,10 +104,33 @@ function toExtractedFields(value: unknown): ExtractedFields {
   };
 }
 
-// 「？」「?」、または「〜か」で終わる文を質問とみなす簡易判定。
+// 文末の絵文字・記号・カッコなどに惑わされないよう、末尾ぴったりの一致ではなく
+// 末尾付近（この文字数）に「？」「?」「か」が含まれるかで質問とみなす簡易判定。
+const QUESTION_END_WINDOW = 10;
+
 function endsWithQuestion(message: string): boolean {
-  const trimmed = message.trim().replace(/[。！]+$/u, "");
-  return trimmed.endsWith("？") || trimmed.endsWith("?") || trimmed.endsWith("か");
+  const tail = message.trim().slice(-QUESTION_END_WINDOW);
+  return /[？?か]/u.test(tail);
+}
+
+// AIが強制指示に従わず質問なしで終えてしまった場合に使う、コード側で用意した固定の代替質問。
+// 上から優先順位順に見て、最初に見つかった空欄の項目についてだけ質問する。
+const FALLBACK_QUESTIONS: { field: keyof ExtractedFields; question: string }[] = [
+  { field: "purpose", question: "このプロジェクトで実現したいことについて、もう少し教えていただけますか？" },
+  { field: "target", question: "どんな方に向けたプロジェクトか、教えていただけますか？" },
+  { field: "story", question: "このプロジェクトを始めたきっかけや、込めた想いについて教えていただけますか？" },
+  { field: "reward", question: "支援してくださった方に、どんなお返しを考えていますか？" },
+];
+
+function buildFallbackQuestion(extracted: ExtractedFields): string | null {
+  const target = FALLBACK_QUESTIONS.find(({ field }) => extracted[field].trim() === "");
+  return target?.question ?? null;
+}
+
+// Geminiが改行を実際の改行文字ではなく、二重エスケープされた文字列
+// （バックスラッシュ+nの2文字）として返すことがあるための防御的な正規化。
+function normalizeLiteralNewlines(text: string): string {
+  return text.replace(/\\n/g, "\n");
 }
 
 async function generateTurn(
@@ -194,17 +217,26 @@ export async function POST(request: Request) {
         ];
         const second = await generateTurn(ai, followUpContents, FORCE_QUESTION_INSTRUCTION);
 
-        combinedMessage = `${first.message}\n\n${second.message}`;
         mergedExtracted = mergeExtractedFields(mergedExtracted, second.extractedUpdates);
+
+        // 強制生成した2回目も質問で終わっているか再検証する。従わなかった場合は、
+        // AIに任せるのをやめ、コード側で用意した固定の代替質問を使う
+        // （AIが指示に従わなくても会話が止まらないようにするため）。
+        combinedMessage = endsWithQuestion(second.message)
+          ? `${first.message}\n\n${second.message}`
+          : `${first.message}\n\n${buildFallbackQuestion(mergedExtracted) ?? ""}`.trim();
       } catch (followUpError) {
-        // 追加発言の生成に失敗しても、1回目の発言はすでに得られているため、
-        // それだけを返してユーザー体験を壊さないようにする。
+        // 追加発言の生成自体に失敗した場合も、同様に固定の代替質問にフォールバックする。
         console.error("Follow-up question generation failed:", followUpError);
+        const fallback = buildFallbackQuestion(mergedExtracted);
+        if (fallback) {
+          combinedMessage = `${first.message}\n\n${fallback}`;
+        }
       }
     }
 
     return NextResponse.json({
-      reply: combinedMessage,
+      reply: normalizeLiteralNewlines(combinedMessage),
       extracted: mergedExtracted,
     });
   } catch (error) {
