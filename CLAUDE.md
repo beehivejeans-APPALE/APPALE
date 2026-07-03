@@ -5,7 +5,7 @@ APPALE! リポジトリで作業する際の方針。
 ## プロジェクト概要
 
 日本語の対話だけで、世界に向けたクラウドファンディングページを完成できるAIプラットフォーム。
-詳細なビジョン・想定機能は [`docs/00_PROJECT.md`](docs/00_PROJECT.md) を参照。Phase 1 として認証機能の実装に着手済み（詳細は [`docs/01_AUTH.md`](docs/01_AUTH.md)）。Phase 2 として、企画をヒアリングするチャット画面、会話からの構造化データ抽出・サイドパネル表示、およびヒアリング完了後のクラファンページ文章生成・プレビュー表示を実装済み（詳細は [`docs/02_CREATE_CHAT.md`](docs/02_CREATE_CHAT.md)）。Supabaseへのプロジェクト保存テーブル（`projects`）とRLS設定（[`docs/03_DATABASE.md`](docs/03_DATABASE.md)）、および会話・抽出データ・生成済みページの自動保存・復元（[`docs/04_PROJECT_SAVE.md`](docs/04_PROJECT_SAVE.md)）も実装済み。ステータス（下書き/レビュー待ち/公開済み）の切り替えUIと、公開ページとしての表示はまだ未実装。
+詳細なビジョン・想定機能は [`docs/00_PROJECT.md`](docs/00_PROJECT.md) を参照。Phase 1 として認証機能の実装に着手済み（詳細は [`docs/01_AUTH.md`](docs/01_AUTH.md)）。Phase 2 として、企画をヒアリングするチャット画面、会話からの構造化データ抽出・サイドパネル表示、およびヒアリング完了後のクラファンページ文章生成・プレビュー表示を実装済み（詳細は [`docs/02_CREATE_CHAT.md`](docs/02_CREATE_CHAT.md)）。Supabaseへのプロジェクト保存テーブル（`projects`）とRLS設定（[`docs/03_DATABASE.md`](docs/03_DATABASE.md)）、および会話・抽出データ・生成済みページの自動保存・復元（[`docs/04_PROJECT_SAVE.md`](docs/04_PROJECT_SAVE.md)）も実装済み。公開申請（下書き→レビュー待ち）UIと、公開済みプロジェクトの公開ページ（`/p/[id]`）表示も実装済み（詳細は [`docs/05_PUBLISH.md`](docs/05_PUBLISH.md)）。レビュー待ち→公開済みへの変更は現時点でSupabase側の手動運用としており、運営用の承認画面は未実装。
 
 ## 構成
 

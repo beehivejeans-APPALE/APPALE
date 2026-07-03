@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import {
   EMPTY_EXTRACTED_FIELDS,
@@ -12,6 +13,7 @@ import {
 import type {
   GetOrCreateProjectApiResponse,
   ProjectPatchBody,
+  ProjectStatus,
 } from "@/types/project";
 import ExtractedPanel from "./ExtractedPanel";
 import PagePreview from "./PagePreview";
@@ -40,6 +42,11 @@ export default function ChatPanel() {
   const [generating, setGenerating] = useState(false);
   const [generateError, setGenerateError] = useState<string | null>(null);
   const [showPreview, setShowPreview] = useState(false);
+  const [status, setStatus] = useState<ProjectStatus>("draft");
+  const [requestingReview, setRequestingReview] = useState(false);
+  const [requestReviewError, setRequestReviewError] = useState<string | null>(
+    null,
+  );
   const [projectId, setProjectId] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -70,6 +77,7 @@ export default function ChatPanel() {
         );
         setExtracted(data.project.extracted);
         setGeneratedPage(data.project.generatedPage);
+        setStatus(data.project.status);
         setSaveStatus("saved");
         setLoaded(true);
       } catch (err) {
@@ -207,6 +215,36 @@ export default function ChatPanel() {
     }
   }
 
+  async function handleRequestReview() {
+    if (!projectId || requestingReview) return;
+
+    setRequestingReview(true);
+    setRequestReviewError(null);
+
+    try {
+      const res = await fetch("/api/project", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: projectId,
+          status: "in_review",
+        } satisfies ProjectPatchBody),
+      });
+
+      if (!res.ok) throw new Error("公開の申請に失敗しました。");
+
+      setStatus("in_review");
+    } catch (err) {
+      setRequestReviewError(
+        err instanceof Error
+          ? err.message
+          : "公開の申請に失敗しました。もう一度お試しください。",
+      );
+    } finally {
+      setRequestingReview(false);
+    }
+  }
+
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
 
@@ -318,6 +356,15 @@ export default function ChatPanel() {
         </div>
         <div className="flex items-center gap-2">
           {generatedPage && (
+            <PublishStatus
+              status={status}
+              projectId={projectId}
+              requesting={requestingReview}
+              error={requestReviewError}
+              onRequestReview={handleRequestReview}
+            />
+          )}
+          {generatedPage && (
             <div className="flex rounded-full border border-black/[.08] p-0.5 text-sm dark:border-white/[.145]">
               <button
                 type="button"
@@ -426,6 +473,61 @@ export default function ChatPanel() {
             onGenerate={handleGeneratePage}
           />
         </div>
+      )}
+    </div>
+  );
+}
+
+function PublishStatus({
+  status,
+  projectId,
+  requesting,
+  error,
+  onRequestReview,
+}: {
+  status: ProjectStatus;
+  projectId: string | null;
+  requesting: boolean;
+  error: string | null;
+  onRequestReview: () => void;
+}) {
+  if (status === "published") {
+    return (
+      <div className="flex items-center gap-2 text-sm">
+        <span className="text-green-700 dark:text-green-400">公開済みです</span>
+        {projectId && (
+          <Link
+            href={`/p/${projectId}`}
+            target="_blank"
+            className="text-zinc-500 underline hover:text-black dark:text-zinc-400 dark:hover:text-zinc-50"
+          >
+            公開ページを見る
+          </Link>
+        )}
+      </div>
+    );
+  }
+
+  if (status === "in_review") {
+    return (
+      <span className="text-sm text-zinc-500 dark:text-zinc-400">
+        レビュー待ちです
+      </span>
+    );
+  }
+
+  return (
+    <div className="flex flex-col items-end gap-1">
+      <button
+        type="button"
+        onClick={onRequestReview}
+        disabled={requesting}
+        className="rounded-full border border-black/[.08] px-4 py-1.5 text-sm transition-colors hover:bg-black/[.04] disabled:opacity-50 dark:border-white/[.145] dark:hover:bg-[#1a1a1a]"
+      >
+        {requesting ? "申請中..." : "公開を申請する"}
+      </button>
+      {error && (
+        <p className="text-xs text-red-600 dark:text-red-400">{error}</p>
       )}
     </div>
   );

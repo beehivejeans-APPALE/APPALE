@@ -120,6 +120,49 @@ export async function PATCH(request: Request) {
     return NextResponse.json({ error: "invalid request" }, { status: 400 });
   }
 
+  // 公開申請（draft → in_review）は他フィールドの部分更新とは独立して扱う。
+  // クライアントから許可するのはこの遷移のみで、in_review → published への変更は
+  // 今回実装しない（Supabase側で手動運用、詳細は docs/05_PUBLISH.md）。
+  if ("status" in body) {
+    if (body.status !== "in_review") {
+      return NextResponse.json({ error: "invalid request" }, { status: 400 });
+    }
+
+    const { data: current, error: selectError } = await supabase
+      .from("projects")
+      .select("status, generated_title")
+      .eq("id", body.id)
+      .eq("user_id", user.id)
+      .maybeSingle();
+
+    if (selectError) {
+      console.error("Failed to load project for status update:", selectError);
+      return NextResponse.json({ error: "database_error" }, { status: 500 });
+    }
+
+    // ページ生成前の申請や、draft以外からの申請は許可しない。
+    if (!current || current.status !== "draft" || !current.generated_title) {
+      return NextResponse.json(
+        { error: "invalid_status_transition" },
+        { status: 409 },
+      );
+    }
+
+    const { error: updateError } = await supabase
+      .from("projects")
+      .update({ status: "in_review" })
+      .eq("id", body.id)
+      .eq("user_id", user.id)
+      .eq("status", "draft");
+
+    if (updateError) {
+      console.error("Failed to update project status:", updateError);
+      return NextResponse.json({ error: "database_error" }, { status: 500 });
+    }
+
+    return NextResponse.json({ ok: true });
+  }
+
   const update: Record<string, unknown> = {};
 
   if ("messages" in body) {

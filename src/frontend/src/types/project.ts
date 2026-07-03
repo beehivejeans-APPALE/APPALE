@@ -31,6 +31,7 @@ export type ProjectState = {
   messages: ChatMessage[];
   extracted: ExtractedFields;
   generatedPage: GeneratedPageContent | null;
+  status: ProjectStatus;
 };
 
 export function rowToProjectState(row: ProjectRow): ProjectState {
@@ -57,6 +58,7 @@ export function rowToProjectState(row: ProjectRow): ProjectState {
       reward: row.reward,
     },
     generatedPage,
+    status: row.status,
   };
 }
 
@@ -69,4 +71,7 @@ export type ProjectPatchBody = {
   messages?: ChatMessage[];
   extracted?: ExtractedFields;
   generatedPage?: GeneratedPageContent | null;
+  // 公開申請（draft → in_review）専用。それ以外の値はサーバー側で拒否する
+  // （in_review → published への変更は今回実装しない。Supabase側で手動運用）。
+  status?: "in_review";
 };
